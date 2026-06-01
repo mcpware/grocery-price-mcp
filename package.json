@@ -1,0 +1,19 @@
+{
+  "name": "@mcpware/grocery-price-mcp",
+  "version": "0.1.0",
+  "description": "Cross-store grocery price comparison MCP for Vancouver. T&T + PriceSmart Foods via open APIs. No login, no Instacart markup.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.4",
+    "typescript": "^5.7.3"
+  }
+}
