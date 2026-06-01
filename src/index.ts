@@ -16,6 +16,7 @@ import { z } from 'zod';
 
 import { searchProducts, browseCategory, getSpecials, getCategories, FLYER_CATEGORIES } from './tnt.js';
 import { mi9Search, mi9CompareAcrossStores, mi9GetStores, MI9_STORES } from './mi9cloud.js';
+import { INSTACART_MARKUP, getMarkupLabel } from './instacart-fallback.js';
 
 const server = new McpServer({ name: 'grocery-price-mcp', version: '0.2.0' });
 
@@ -174,6 +175,60 @@ server.tool(
       return `${s.name} — ${s.address}, ${s.city} ${s.postalCode} (id: ${s.retailerStoreId})${modes}`;
     });
     return { content: [{ type: 'text' as const, text: `${storeName} (${stores.length} locations):\n\n${lines.join('\n')}` }] };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: instacart_markup — check which stores have Instacart markup
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'instacart_markup',
+  'Check which stores have Instacart price markup. Stores with markup charge ~5-15% MORE than in-store prices on Instacart. Use this to decide whether to buy via Instacart or go direct.',
+  {},
+  async () => {
+    const noMarkup: string[] = [];
+    const hasMarkup: string[] = [];
+    for (const [slug, info] of Object.entries(INSTACART_MARKUP)) {
+      const label = `${info.name} (${slug})`;
+      if (info.noMarkup) noMarkup.push(label);
+      else hasMarkup.push(label);
+    }
+    const lines = [
+      'Instacart Markup Map (Vancouver)\n',
+      'NO MARKUP (Instacart price = in-store price):',
+      ...noMarkup.map(s => `  ${s}`),
+      '',
+      'HAS MARKUP (Instacart adds ~5-15% on top):',
+      ...hasMarkup.map(s => `  ${s}`),
+      '',
+      'Strategy:',
+      '  - Stores with open API (T&T, Save-On, PriceSmart, Fresh St, Urban Fare) -> use grocery_compare (this MCP)',
+      '  - No-markup stores without API (No Frills, FreshCo, Nesters, Choices) -> Instacart is fine',
+      '  - Markup stores without API (Walmart, Costco, Superstore) -> go in-store or use store website directly',
+    ];
+    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: instacart_check — check one store's markup status
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'instacart_check',
+  'Check if a specific store has Instacart markup. Returns whether buying via Instacart costs more than in-store.',
+  { store: z.string().describe('Store slug from Instacart, e.g. "walmart-canada", "costco-canada", "no-frills-can"') },
+  async ({ store }: { store: string }) => {
+    const label = getMarkupLabel(store);
+    const info = INSTACART_MARKUP[store];
+    if (!info) {
+      return { content: [{ type: 'text' as const, text: `Unknown store "${store}". Known stores: ${Object.keys(INSTACART_MARKUP).join(', ')}` }] };
+    }
+    const advice = info.noMarkup
+      ? `${info.name}: NO markup on Instacart. Instacart price = in-store price. Safe to buy via Instacart.`
+      : `${info.name}: HAS markup on Instacart (~5-15% higher). Better to buy in-store or from store website directly.`;
+    return { content: [{ type: 'text' as const, text: advice }] };
   },
 );
 
