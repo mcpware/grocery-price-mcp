@@ -171,8 +171,8 @@ export async function browseCategory(categoryId: number, pageSize = 20): Promise
 
 export async function getSpecials(): Promise<{ priceDrop: TntProduct[]; multiSave: TntProduct[] }> {
   const [pd, ms] = await Promise.all([
-    browseCategory(FLYER_CATEGORIES.PRICE_DROP, 50),
-    browseCategory(FLYER_CATEGORIES.MULTI_SAVE, 50),
+    browseCategory(FLYER_CATEGORIES.PRICE_DROP, 50).catch(() => ({ total: 0, categoryName: 'Price Drop', products: [] })),
+    browseCategory(FLYER_CATEGORIES.MULTI_SAVE, 50).catch(() => ({ total: 0, categoryName: 'Multi-Save', products: [] })),
   ]);
   return {
     priceDrop: pd.products,

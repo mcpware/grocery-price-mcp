@@ -68,6 +68,10 @@ export interface Mi9Product {
   size: string;
   description: string;
   store: string;
+  onSale: boolean;
+  priceSource: string;
+  saleFrom?: string;
+  saleUntil?: string;
 }
 
 export interface Mi9StoreLocation {
@@ -97,6 +101,8 @@ async function mi9Get<T>(store: Mi9Store, path: string): Promise<T> {
 }
 
 function mapProduct(item: any, storeName: string): Mi9Product {
+  const tpr = item.tprPrice?.[0];
+  const isTpr = item.priceSource === 'tpr' || (tpr?.active === true);
   return {
     name: item.name || '',
     sku: item.sku || item.productId || '',
@@ -106,6 +112,10 @@ function mapProduct(item: any, storeName: string): Mi9Product {
     size: item.unitOfSize ? `${item.unitOfSize.size}${item.unitOfSize.abbreviation}` : '',
     description: (item.description || '').slice(0, 100),
     store: storeName,
+    onSale: isTpr,
+    priceSource: item.priceSource || 'regular',
+    saleFrom: tpr?.effectiveFrom?.slice(0, 10),
+    saleUntil: tpr?.effectiveUntil?.slice(0, 10),
   };
 }
 

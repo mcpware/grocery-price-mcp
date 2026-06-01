@@ -49,7 +49,8 @@ server.tool(
       if (products.length === 0) { lines.push('  (no results)'); continue; }
       for (const p of products) {
         const unit = p.pricePerUnit ? ` (${p.pricePerUnit})` : '';
-        lines.push(`  ${p.name} — $${p.price.toFixed(2)}${unit}`);
+        const sale = p.onSale ? ` SALE (until ${p.saleUntil || '?'})` : '';
+        lines.push(`  ${p.name} — $${p.price.toFixed(2)}${unit}${sale}`);
       }
     }
 
