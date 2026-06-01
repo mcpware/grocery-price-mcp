@@ -2,11 +2,12 @@
 /**
  * Grocery Price MCP — Cross-store price comparison for Vancouver.
  *
- * Stores supported (all open APIs, no login required):
+ * 5 stores, all open APIs, no login:
  * - T&T Supermarket (Magento 2 GraphQL)
- * - PriceSmart Foods (mi9cloud REST)
- *
- * No Instacart, no markup, no login.
+ * - Save-On-Foods (mi9cloud REST, 190 stores)
+ * - PriceSmart Foods (mi9cloud REST, 5 stores)
+ * - Fresh St. Market (mi9cloud REST, 9 stores)
+ * - Urban Fare (mi9cloud REST, 5 stores)
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -14,26 +15,27 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 
 import { searchProducts, browseCategory, getSpecials, getCategories, FLYER_CATEGORIES } from './tnt.js';
-import { psSearch, psGetStores } from './pricesmart.js';
+import { mi9Search, mi9CompareAcrossStores, mi9GetStores, MI9_STORES } from './mi9cloud.js';
 
-const server = new McpServer({ name: 'grocery-price-mcp', version: '0.1.0' });
+const server = new McpServer({ name: 'grocery-price-mcp', version: '0.2.0' });
+
+const MI9_SLUGS = Object.keys(MI9_STORES);
 
 // ---------------------------------------------------------------------------
-// Tool: grocery_compare — the main cross-store comparison
+// Tool: grocery_compare — cross ALL 5 stores
 // ---------------------------------------------------------------------------
 
 server.tool(
   'grocery_compare',
-  'Compare a product across T&T and PriceSmart Foods. Shows real prices from both stores, sorted cheapest first. No Instacart markup.',
+  'Compare a product across ALL 5 stores (T&T + Save-On + PriceSmart + Fresh St + Urban Fare). Shows real prices, cheapest first. No login, no Instacart markup.',
   { query: z.string().describe('Product to compare, e.g. "minced garlic" or "dried shiitake"') },
   async ({ query }: { query: string }) => {
-    const [tnt, ps] = await Promise.all([
+    const [tnt, mi9All] = await Promise.all([
       searchProducts(query, 5).catch(() => ({ total: 0, products: [] as any[] })),
-      psSearch(query, undefined, 5).catch(() => ({ total: 0, products: [] as any[] })),
+      mi9CompareAcrossStores(query, 3),
     ]);
 
-    const lines: string[] = [];
-    lines.push(`"${query}" cross-store comparison\n`);
+    const lines: string[] = [`"${query}" — cross-store comparison\n`];
 
     lines.push('T&T Supermarket:');
     if (tnt.products.length === 0) lines.push('  (no results)');
@@ -42,11 +44,13 @@ server.tool(
       lines.push(`  ${p.name} — $${p.finalPrice.toFixed(2)}${sale}`);
     }
 
-    lines.push('\nPriceSmart Foods:');
-    if (ps.products.length === 0) lines.push('  (no results)');
-    for (const p of ps.products) {
-      const unit = p.pricePerUnit ? ` (${p.pricePerUnit})` : '';
-      lines.push(`  ${p.name} — $${p.price.toFixed(2)}${unit}`);
+    for (const { store, products } of mi9All) {
+      lines.push(`\n${store}:`);
+      if (products.length === 0) { lines.push('  (no results)'); continue; }
+      for (const p of products) {
+        const unit = p.pricePerUnit ? ` (${p.pricePerUnit})` : '';
+        lines.push(`  ${p.name} — $${p.price.toFixed(2)}${unit}`);
+      }
     }
 
     return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
@@ -131,35 +135,44 @@ server.tool(
 );
 
 // ---------------------------------------------------------------------------
-// Tool: pricesmart_search
+// Tool: store_search — search any mi9cloud store
 // ---------------------------------------------------------------------------
 
 server.tool(
-  'pricesmart_search',
-  'Search PriceSmart Foods products. Returns real prices + per-unit pricing.',
-  { query: z.string(), maxResults: z.number().optional().default(8) },
-  async ({ query, maxResults }: { query: string; maxResults: number }) => {
-    const { total, products } = await psSearch(query, undefined, maxResults);
+  'store_search',
+  `Search products at a specific store. Available stores: ${MI9_SLUGS.join(', ')}`,
+  {
+    store: z.enum(MI9_SLUGS as [string, ...string[]]).describe('Store slug'),
+    query: z.string(),
+    maxResults: z.number().optional().default(8),
+  },
+  async ({ store, query, maxResults }: { store: string; query: string; maxResults: number }) => {
+    const { total, products } = await mi9Search(store, query, undefined, maxResults);
+    const storeName = MI9_STORES[store].name;
     const lines = products.map((p: any) => {
       const unit = p.pricePerUnit ? ` (${p.pricePerUnit})` : '';
-      return `${p.name} [${p.brand}] — $${p.price.toFixed(2)}${unit} | ${p.size}`;
+      return `${p.name} [${p.brand}] — $${p.price.toFixed(2)}${unit}`;
     });
-    return { content: [{ type: 'text' as const, text: `PriceSmart: ${total} results for "${query}":\n\n${lines.join('\n')}` }] };
+    return { content: [{ type: 'text' as const, text: `${storeName}: ${total} results for "${query}":\n\n${lines.join('\n')}` }] };
   },
 );
 
 // ---------------------------------------------------------------------------
-// Tool: pricesmart_stores
+// Tool: store_locations — list locations for any mi9cloud store
 // ---------------------------------------------------------------------------
 
 server.tool(
-  'pricesmart_stores',
-  'List PriceSmart Foods store locations in Metro Vancouver.',
-  {},
-  async () => {
-    const stores = await psGetStores();
-    const lines = stores.map((s: any) => `${s.name} — ${s.address}, ${s.city} ${s.postalCode} (id: ${s.retailerStoreId})`);
-    return { content: [{ type: 'text' as const, text: `PriceSmart Foods (${stores.length} stores):\n\n${lines.join('\n')}` }] };
+  'store_locations',
+  `List store locations. Available: ${MI9_SLUGS.join(', ')}`,
+  { store: z.enum(MI9_SLUGS as [string, ...string[]]).describe('Store slug') },
+  async ({ store }: { store: string }) => {
+    const stores = await mi9GetStores(store);
+    const storeName = MI9_STORES[store].name;
+    const lines = stores.map((s: any) => {
+      const modes = s.shoppingModes.length ? ` [${s.shoppingModes.join(', ')}]` : '';
+      return `${s.name} — ${s.address}, ${s.city} ${s.postalCode} (id: ${s.retailerStoreId})${modes}`;
+    });
+    return { content: [{ type: 'text' as const, text: `${storeName} (${stores.length} locations):\n\n${lines.join('\n')}` }] };
   },
 );
 
