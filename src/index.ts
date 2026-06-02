@@ -17,8 +17,9 @@ import { z } from 'zod';
 import { searchProducts, browseCategory, getSpecials, getCategories, FLYER_CATEGORIES } from './tnt.js';
 import { mi9Search, mi9CompareAcrossStores, mi9GetStores, MI9_STORES } from './mi9cloud.js';
 import { INSTACART_MARKUP, getMarkupLabel } from './instacart-fallback.js';
+import { serperShopping, serperShoppingByStore, firecrawlConfirm } from './shopping-fallback.js';
 
-const server = new McpServer({ name: 'grocery-price-mcp', version: '0.2.0' });
+const server = new McpServer({ name: 'grocery-price-mcp', version: '0.5.0' });
 
 const MI9_SLUGS = Object.keys(MI9_STORES);
 
@@ -229,6 +230,112 @@ server.tool(
       ? `${info.name}: NO markup on Instacart. Instacart price = in-store price. Safe to buy via Instacart.`
       : `${info.name}: HAS markup on Instacart (~5-15% higher). Better to buy in-store or from store website directly.`;
     return { content: [{ type: 'text' as const, text: advice }] };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: shopping_search — Google Shopping (Walmart/Amazon/Costco/all stores)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'shopping_search',
+  'Search Google Shopping for products across ALL Canadian stores (Walmart, Amazon, Costco, Canadian Tire, Home Depot, etc). Returns up to 40 results with real prices. Use this for stores without open APIs.',
+  {
+    query: z.string().describe('Product to search, e.g. "Anker 30W USB-C charger"'),
+    maxResults: z.number().optional().default(20).describe('Max results (default 20, returns up to 2x)'),
+  },
+  async ({ query, maxResults }: { query: string; maxResults: number }) => {
+    const results = await serperShopping(query, maxResults);
+    const lines = results.map((r: any, i: number) =>
+      `${i + 1}. ${r.name.slice(0, 45)} — ${r.price} | ${r.store}${r.rating ? ` (${r.rating}★ ${r.ratingCount})` : ''}`
+    );
+    return { content: [{ type: 'text' as const, text: `Google Shopping: ${results.length} results for "${query}":\n\n${lines.join('\n')}` }] };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: walmart_amazon_costco — compare across these 3 specifically
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'walmart_amazon_costco',
+  'Compare a product across Walmart, Amazon, and Costco specifically. Uses Google Shopping data since these stores have no open API.',
+  { query: z.string().describe('Product to search') },
+  async ({ query }: { query: string }) => {
+    const byStore = await serperShoppingByStore(query, ['Walmart', 'Amazon', 'Costco'], 5);
+    const lines: string[] = [`"${query}" — Walmart vs Amazon vs Costco\n`];
+    for (const { store, products } of byStore) {
+      lines.push(`${store}:`);
+      if (products.length === 0) { lines.push('  (not found on Google Shopping)'); continue; }
+      for (const p of products) {
+        lines.push(`  ${p.name.slice(0, 42)} — ${p.price}${p.rating ? ` (${p.rating}★)` : ''}`);
+      }
+    }
+    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: price_confirm — Firecrawl a specific product URL to confirm price
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'price_confirm',
+  'Confirm a product price by scraping the actual product page (Amazon, Walmart, etc). Use after shopping_search to verify a price is real and in-stock.',
+  { url: z.string().describe('Product page URL to scrape') },
+  async ({ url }: { url: string }) => {
+    const result = await firecrawlConfirm(url);
+    if (!result) return { content: [{ type: 'text' as const, text: `Could not scrape ${url}. The site may be blocking scrapers.` }] };
+    const stock = result.inStock ? 'IN STOCK' : 'may be unavailable';
+    return { content: [{ type: 'text' as const, text: `Confirmed: ${result.title}\nPrice: ${result.price}\nStock: ${stock}` }] };
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tool: full_compare — compare across ALL stores (API + Google Shopping)
+// ---------------------------------------------------------------------------
+
+server.tool(
+  'full_compare',
+  'Compare a product across ALL stores: T&T + Save-On + PriceSmart + Fresh St + Urban Fare (via API) + Walmart + Amazon + Costco (via Google Shopping). The most comprehensive cross-store comparison.',
+  { query: z.string().describe('Product to compare') },
+  async ({ query }: { query: string }) => {
+    const [tnt, mi9All, shopping] = await Promise.all([
+      searchProducts(query, 3).catch(() => ({ total: 0, products: [] as any[] })),
+      mi9CompareAcrossStores(query, 2),
+      serperShoppingByStore(query, ['Walmart', 'Amazon', 'Costco'], 3),
+    ]);
+
+    const lines: string[] = [`"${query}" — FULL cross-store comparison\n`];
+
+    // API stores
+    lines.push('=== Direct API (real-time, exact prices) ===\n');
+    lines.push('T&T:');
+    if (tnt.products.length === 0) lines.push('  (no results)');
+    for (const p of tnt.products) {
+      const sale = p.onSale ? ` ${p.discountPercent.toFixed(0)}% off` : '';
+      lines.push(`  ${p.name.slice(0, 40)} — $${p.finalPrice.toFixed(2)}${sale}`);
+    }
+    for (const { store, products } of mi9All) {
+      lines.push(`\n${store}:`);
+      if (products.length === 0) { lines.push('  (no results)'); continue; }
+      for (const p of products) {
+        const sale = p.onSale ? ` SALE` : '';
+        lines.push(`  ${p.name.slice(0, 40)} — $${p.price.toFixed(2)}${sale}`);
+      }
+    }
+
+    // Google Shopping stores
+    lines.push('\n\n=== Google Shopping (cached, ~90% accurate) ===\n');
+    for (const { store, products } of shopping) {
+      lines.push(`${store}:`);
+      if (products.length === 0) { lines.push('  (not found)'); continue; }
+      for (const p of products) {
+        lines.push(`  ${p.name.slice(0, 40)} — ${p.price}`);
+      }
+    }
+
+    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
   },
 );
 
