@@ -86,9 +86,16 @@ async function gql<T>(query: string): Promise<T> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+      // T&T added anti-bot (2026-06): a Linux UA gets 403. Windows Chrome UA +
+      // `Accept-Encoding: identity` (server otherwise returns gzip the fetch
+      // client mishandles) returns 200. Do NOT add a "Store" header — the
+      // default store works; explicit codes return "Requested store is not found".
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Accept-Language': 'en-CA',
       'Origin': 'https://www.tntsupermarket.com',
       'Referer': 'https://www.tntsupermarket.com/',
+      'Accept-Encoding': 'identity',
     },
     body: JSON.stringify({ query }),
   });

@@ -1,0 +1,1 @@
+{"mcpServers":{"grocery-price":{"command":"/home/nicole/.nvm/versions/node/v20.19.4/bin/npx","args":["tsx","/home/nicole/MyGithub/grocery-price-mcp/src/index.ts"]}}}
